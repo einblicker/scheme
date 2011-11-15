@@ -1,81 +1,83 @@
 package scheme
 
 object CPSConv {
+  import Ast._
+  import Util._
 
-  def isPrimitive(x: Ast): Boolean = {
+  private val primitives = Set("*", "-", "/", "+", "print", "eq?")
+  
+  def isPrimitive(x: Ast): Boolean =
     x match {
-      case SSymbol(name) => Set("*", "-", "/", "+", "print", "eq?").contains(name)
+      case SSymbol(name) => primitives.contains(name)
       case _ => false
     }
-  }
-
-  val gensym: () => SSymbol = {
-    var count = 0
-    () => {
-      count += 1
-      SSymbol("g" + count)
-    }
-  }
   
-  def cps(expr: Ast, cont: Ast => Ast): Ast = {
+  def cps(expr: Ast, cont: Ast): Ast = {
     
-    def cpsSet(name: SSymbol, expr: Ast, cont: Ast => Ast): Ast =
-      cps(expr, ast => cont(SList(List(SSymbol("set!"), name, ast))))
+    def cpsAtom(atom: Ast, cont: Ast): Ast =
+      mkApp(cont, List(atom))
 
-    def cpsBegin(body: List[Ast], cont: Ast => Ast): Ast =
+    def cpsIf(cexpr: Ast, texpr: Ast, fexpr: Ast, cont: Ast): Ast = {
+      val g = gensym()
+      cps(cexpr, mkFn(List(g), mkIf(g, cps(texpr, cont), cps(fexpr, cont))))
+    }
+
+    def cpsSet(name: SSymbol, expr: Ast, cont: Ast): Ast = {
+      val g = gensym()
+      cps(expr,
+	  mkFn(List(g), 
+	       mkApp(cont, List(mkSet(name, g)))))
+    }
+    
+    def cpsDefine(name: SSymbol, expr: Ast, cont: Ast): Ast = {
+      val g = gensym()
+      cps(expr,
+	  mkFn(List(g),
+	       mkApp(cont, List(mkDefine(name, g)))))
+    }
+
+    def cpsBegin(body: List[Ast], cont: Ast): Ast =
       body match {
 	case List(x) => cps(x, cont)
 	case x :: xs =>
         val g = gensym()
-	cpsBegin(xs, ast => {
-	 cps(x, ast1 => 
-             SList(List(
-	       SList(List(SSymbol("lambda"),
-			  SList(List(g)),
-			  cont(ast))),
-	       ast1)))
-	 })
+	cps(x, mkFn(List(g), cpsBegin(xs, cont)))
 	case Nil => cps(SList(Nil), cont)
       }
 
-    def cpsPrimitive(expr: List[Ast], cont: Ast => Ast): Ast =
-      cpsArgs(expr.tail, args => cont(SList(expr.head :: args)))
-
-    def cpsArgs(args: List[Ast], cont: List[Ast] => Ast): Ast =
-      args match {
-	case x :: xs => cps(x, value => cpsArgs(xs, vals => cont(value :: vals)))
-	case Nil => cont(Nil)
+    def cpsPrimitive(expr: List[Ast], cont: Ast): Ast = {
+      val fn :: args = expr
+      val gs = (0 until args.length).map(_ => gensym()).toList
+      (args zip gs).reverse.foldRight(mkApp(cont, List(mkApp(fn, gs)))) {
+	case ((arg, g), ast) => cps(arg, mkFn(List(g), ast))
       }
-
-    def cpsLambda(vars: List[Ast], body: Ast, cont: Ast => Ast): Ast = {
-      val cont1 = gensym()
-      cont(SList(List(
-	SSymbol("lambda"),
-	SList(cont1 :: vars),
-	cps(body, ast => SList(List(cont1, ast))))))
     }
 
-    def cpsApplication(expr: List[Ast], cont: Ast => Ast): Ast = {
-      val value = gensym()
-      println(cont(SSymbol("dummy")))
-      cpsArgs(expr.tail, ast =>
-	SList(expr.head :: SList(List(SSymbol("lambda"),
-	                              SList(List(value)),
-				      cont(value))) :: ast))
-//      SList(List(SSymbol("lambda"),
-//		 SList(List(value)),
-//		 SList(expr.head :: cont(value) :: ast)))
-//	    )
+    def cpsLambda(vars: List[Ast], body: Ast, cont: Ast): Ast = {
+      val g = gensym()
+      mkApp(cont, List(mkFn(g :: vars, cps(body, g))))
     }
+
+    def cpsApplication(expr: List[Ast], cont: Ast): Ast =
+      (expr: @unchecked) match {
+	case List(x) =>
+          val g = gensym()
+	  cps(x, mkFn(List(g), mkApp(g, List(cont))))
+	case List(x, y) =>
+	  val g, g1 = gensym()
+          cps(x, mkFn(List(g), cps(y, mkFn(List(g1), mkApp(g, List(cont, g1))))))
+	case List(x, y, z) =>
+          val g, g1, g2 = gensym()
+          cps(x, mkFn(List(g), cps(y, mkFn(List(g1), cps(z, mkFn(List(g2), mkApp(g, List(cont, g1, g2))))))))
+      }
     
-    expr match {
-      case _: SString | _: SDouble | _: SBool | _: SQuote | _: SSymbol => cont(expr)
+    (expr: @unchecked) match {
+      case _: SString | _: SDouble | _: SBool | _: SQuote | _: SSymbol =>
+	cpsAtom(expr, cont)
       case SList(List(SSymbol("if"), cexpr, texpr, fexpr)) =>
-	cps(cexpr, ast => {
-          SList(List(SSymbol("if"), ast, cps(texpr, cont), cps(fexpr, cont)))
-        })
-      case SList(List(SSymbol("define"), name, value)) =>
-	cps(value, ast => cont(SList(List(SSymbol("define"), name, ast))))
+	cpsIf(cexpr, texpr, fexpr, cont)
+      case SList(List(SSymbol("define"), (name: SSymbol), value)) =>
+	cpsDefine(name, value, cont)
       case SList(SSymbol("begin") :: rest) =>
 	cpsBegin(rest, cont)
       case SList(List(SSymbol("set!"), (name: SSymbol), value)) =>
