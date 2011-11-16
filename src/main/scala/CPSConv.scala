@@ -1,14 +1,16 @@
 package scheme
 
 object CPSConv {
-  import Ast._
-  import Util._
+  import Util.gensym
+  import Ast.{mkFn, mkApp, mkIf, mkDefine, mkSet}
 
-  private val primitives = Set("*", "-", "/", "+", "print", "eq?")
-  
   def isPrimitive(x: Ast): Boolean =
     x match {
-      case SSymbol(name) => primitives.contains(name)
+      case SSymbol(name) =>
+	Evaluator.lookup(Evaluator.globalEnv, name) match {
+          case Some(_: SPrim) => true
+          case _ => false
+        }
       case _ => false
     }
   

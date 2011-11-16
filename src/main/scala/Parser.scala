@@ -1,5 +1,5 @@
 package scheme
-import util.parsing.combinator._
+import util.parsing.combinator.RegexParsers
 
 object Parser extends RegexParsers {
   def expr: Parser[Ast] =
