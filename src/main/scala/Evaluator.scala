@@ -10,30 +10,32 @@ object Evaluator {
   val globalEnv: Env = 
     List(
       Map(
-	"eq?" -> SPrim("eq?", {case xs: List[SDouble] => SBool(xs(0).value == xs(1).value)}),
+	"eq?" -> SPrim("eq?", {case List(x, y) => SBool(x == y) case _ => sys.error("illegal argument")}),
 	"+"   -> SPrim("+",   {case xs: List[SDouble] => SDouble(xs.map(_.value).sum)}),
 	"-"   -> SPrim("-",   {case xs: List[SDouble] => SDouble(xs.map(_.value).reduceLeft(_ - _))}),
 	"*"   -> SPrim("*",   {case xs: List[SDouble] => SDouble(xs.map(_.value).reduceLeft(_ * _))}),
 	"/"   -> SPrim("/",   {case xs: List[SDouble] => SDouble(xs.map(_.value).reduceLeft(_ / _))}),
 	"print" -> SPrim("print", {case List(x) => println(x); SList(List()) case Nil => sys.error("too many arguments") }),
-	"identity" -> SPrim("identity", {case List(x) => x; case Nil => sys.error("too many arguments") }),
+	"cons" -> SPrim("cons", {case List(car, SList(cdr)) => SList(car :: cdr) case _ => sys.error("illegal argument")}),
+	"car" -> SPrim("car", {case List(SList(car :: _)) => car case _ => sys.error("illegal argument")}),
+	"cdr" -> SPrim("cdr", {case List(SList(_ :: cdr)) => SList(cdr) case _ => sys.error("illegal argument")}),
 	"exit" -> SPrim("exit", {case _ => sys.exit(0)})
 	))
 
   globalEnv(0) += ("reset/pc" -> {
-    val lambda, cont = gensym()
+    val lambda, cont, x = gensym()
     SProc(List(cont, lambda),
 	  mkApp(cont,
 		List(mkApp(lambda,
-			   List(SSymbol("identity"))))),
+			   List(mkFn(List(x), x))))),
 	  globalEnv)
   })
 
   globalEnv(0) += ("call/pc" -> {
-    val lambda, cont, cont1, value = gensym()
+    val lambda, cont, cont1, value, x = gensym()
     SProc(List(cont, lambda),
 	  mkApp(lambda,
-		List(SSymbol("identity"),
+		List(mkFn(List(x), x),
 		     mkFn(List(cont1, value),
 			  mkApp(cont1,
 				List(mkApp(cont, List(value))))))),
@@ -41,11 +43,11 @@ object Evaluator {
   })
 
   globalEnv(0) += ("call/cc" -> {
-    val lambda, cont, _g, result = gensym()
+    val lambda, cont, dummy, result = gensym()
     SProc(List(cont, lambda),
 	  mkApp(lambda,
 		List(cont,
-		     mkFn(List(_g, result),
+		     mkFn(List(dummy, result),
 			  mkApp(cont, List(result))))),
 	  globalEnv)
   })
